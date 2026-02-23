@@ -24,8 +24,8 @@ class UndervaluationEngine:
 
     def run_pipeline(self):
         print("Starting pipeline: Training Baseline...")
-        # Features for baseline: sqft, beds, baths, neighborhood, and HOA fee
-        X_baseline = self.df[['sqft', 'beds', 'baths', 'neighborhood_id', 'hoa_fee']]
+        # Features for baseline: sqft, beds, baths, neighborhood
+        X_baseline = self.df[['sqft', 'beds', 'baths', 'neighborhood_id']]
         y = self.df['price']
         self.baseline.fit(X_baseline, y)
         
@@ -45,8 +45,8 @@ class UndervaluationEngine:
                 continue
             
             local_model = OverfitPerceptron()
-            # Local models also take HOA into account
-            X_local = nb_data[['sqft', 'beds', 'baths', 'days_since_start', 'hoa_fee']]
+            # Local models
+            X_local = nb_data[['sqft', 'beds', 'baths', 'days_since_start']]
             y_local = nb_data['price']
             
             local_model.fit(X_local, y_local)
@@ -65,7 +65,7 @@ class UndervaluationEngine:
         predictions = []
         for idx, row in candidates.iterrows():
             # Get baseline
-            base_p = self.baseline.predict(row[['sqft', 'beds', 'baths', 'neighborhood_id', 'hoa_fee']].values.reshape(1, -1))[0]
+            base_p = self.baseline.predict(row[['sqft', 'beds', 'baths', 'neighborhood_id']].values.reshape(1, -1))[0]
             
             # Get time adjustment
             time_p = self.time_trend.predict(np.array([row['days_since_start']]))[0]
@@ -73,7 +73,7 @@ class UndervaluationEngine:
             # Get local model prediction (default to baseline+time if no local cluster)
             nb_id = row['neighborhood_id']
             if nb_id in self.local_models:
-                local_p = self.local_models[nb_id].predict(row[['sqft', 'beds', 'baths', 'days_since_start', 'hoa_fee']].values.reshape(1, -1))[0]
+                local_p = self.local_models[nb_id].predict(row[['sqft', 'beds', 'baths', 'days_since_start']].values.reshape(1, -1))[0]
                 final_pred = (base_p + time_p) * 0.3 + local_p * 0.7
             else:
                 final_pred = base_p + time_p

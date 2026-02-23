@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
+from sklearn.linear_model import HuberRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.base import BaseEstimator, RegressorMixin
 
@@ -63,7 +64,7 @@ class TimeTrendRegressor:
     Calculates the appreciation trend over time.
     """
     def __init__(self):
-        self.model = RandomForestRegressor(n_estimators=50, random_state=42)
+        self.model = HuberRegressor()
 
     def fit(self, days_since_start, residuals):
         # We fit residuals from the baseline against time
