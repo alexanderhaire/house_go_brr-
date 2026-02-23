@@ -1,7 +1,9 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import os
 from engine.models import BaselineRegressor, OverfitPerceptron, TimeTrendRegressor
+from engine.llm_evaluator import LLMPropertyEvaluator
 
 class UndervaluationEngine:
     def __init__(self, data=None, data_path=None):
@@ -81,10 +83,10 @@ class UndervaluationEngine:
         candidates['predicted_price'] = predictions
         
         # Financial Modeling: 100% Debt & Total Carrying Cost
-        # Assume 6.0% interest rate on a 30-year fixed mortgage (0.06 / 12 monthly rate)
-        # Based on current Feb 2026 market rates for Florida with 720+ credit score
+        # Assume an interest rate on a 30-year fixed mortgage based on MORGAGE_INTEREST_RATE env (default 6%)
         # Mortgage math: M = P [ i(1 + i)^n ] / [ (1 + i)^n - 1 ]
-        monthly_interest_rate = 0.06 / 12
+        mortgage_rate = float(os.getenv("MORTGAGE_INTEREST_RATE", "0.06"))
+        monthly_interest_rate = mortgage_rate / 12
         num_payments = 30 * 12
         
         # Calculate monthly mortgage payment for 100% of the listed price
@@ -95,19 +97,52 @@ class UndervaluationEngine:
         # Total carrying cost = Mortgage + HOA
         candidates['total_monthly_cost'] = candidates['monthly_mortgage'] + candidates['hoa_fee']
         
-        # Recalculate 'fee_capitalized_cost' as the total sunk carrying cost impact
-        # Every $1 in total monthly cost represents ~$150 in lost buying power
-        candidates['fee_capitalized_cost'] = candidates['total_monthly_cost'] * 150
+        # FIX THE FATAL ERROR: Mortgage principal builds equity, while HOA is a 100% sunk cost.
+        # We only capitalize the HOA fee. Every $1/mo in HOA reduces buying power by ~$150.
+        candidates['fee_capitalized_cost'] = candidates['hoa_fee'] * 150
         
+        # Adjusted Fair Value = AI Predicted Value minus the Sunk Cost burden of the HOA
         candidates['fee_adjusted_value'] = candidates['predicted_price'] - candidates['fee_capitalized_cost']
         
+        # Undervaluation Amount = How much True Value you get above the Listed Price
         candidates['undervaluation_amount'] = candidates['fee_adjusted_value'] - candidates['price']
         
-        # FIX: Use absolute value in the denominator so that negative adjusted values don't flip the sign
-        candidates['undervaluation_pct'] = (candidates['undervaluation_amount'] / candidates['fee_adjusted_value'].abs()) * 100
+        # Percentage margin of safety (Positive % = Good Deal)
+        candidates['undervaluation_pct'] = (candidates['undervaluation_amount'] / candidates['price']) * 100
         
+        # Sort to get the preliminary top N
         results = candidates.sort_values('undervaluation_pct', ascending=False)
-        return results.head(top_n)
+        top_preliminary = results.head(top_n).copy()
+        
+        # Now apply the LLM Condition/Risk Evaluation on the top candidates
+        llm = LLMPropertyEvaluator()
+        
+        updated_rows = []
+        for idx, row in top_preliminary.iterrows():
+            eval_result = llm.evaluate_property(row.to_dict())
+            
+            # Apply the multiplier to the predicted baseline price
+            updated_predicted_price = row['predicted_price'] * eval_result['risk_multiplier']
+            
+            # Recalculate everything downstream
+            updated_fee_adjusted = updated_predicted_price - row['fee_capitalized_cost']
+            updated_underv_amt = updated_fee_adjusted - row['price']
+            updated_underv_pct = (updated_underv_amt / row['price']) * 100 if row['price'] != 0 else 0
+            
+            row['predicted_price'] = updated_predicted_price
+            row['fee_adjusted_value'] = updated_fee_adjusted
+            row['undervaluation_amount'] = updated_underv_amt
+            row['undervaluation_pct'] = updated_underv_pct
+            row['llm_risk_multiplier'] = eval_result['risk_multiplier']
+            row['llm_reasoning'] = eval_result['reasoning']
+            
+            updated_rows.append(row)
+            
+        final_results = pd.DataFrame(updated_rows)
+        # Re-sort in case the LLM significantly penalized the old #1
+        final_results = final_results.sort_values('undervaluation_pct', ascending=False)
+        
+        return final_results
 
     def find_undervalued_homes(self, top_n=20):
         # Compatibility wrapper for internal historical data

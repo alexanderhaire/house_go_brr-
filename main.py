@@ -8,6 +8,11 @@ import time
 from datetime import datetime
 
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 # You can move this to config.py later if you prefer
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1475344856501981294/U1Ayd3EJAQuLzA5AWsRZOIsUiVQ6Ken9JjQxMIC2Q8o5-9MrPn5RsLQgoHydG2VGQv5i")
 
@@ -38,25 +43,29 @@ def send_discord_alert(gem_df, is_new_champ=False, reason=""):
     alpha_str = f"{row['undervaluation_pct']:.1f}%"
     mortgage_str = f"${row['monthly_mortgage']:,.0f}/mo"
     hoa_str = f"${row['hoa_fee']:,.0f}/mo"
-    tax_ins_str = f"${row['monthly_tax_ins']:,.0f}/mo"
+    tax_ins_str = f"${row.get('monthly_tax_ins', 0):,.0f}/mo"
     total_monthly = row['total_monthly_cost']
     total_str = f"${total_monthly:,.0f}/mo"
 
-    title_prefix = "🏆 NEW CHAMPION:" if is_new_champ else "🚨 NEW GEM:"
+    mortgage_rate = float(os.getenv("MORTGAGE_INTEREST_RATE", "0.06"))
+    mortgage_rate_pct = f"{mortgage_rate * 100:g}%"
 
+    title_prefix = "💎"
     embed = {
         "title": f"{title_prefix} {alpha_str} Undervalued",
-        "description": f"The #1 Best Deal currently on the market in Tampa ({row['neighborhood_name']})!\n{reason}\n*Evaluated at 100% Debt Financing (6% Market Rate)*",
+        "description": f"The #1 Best Deal currently on the market in Tampa ({row['neighborhood_name']})!\n{reason}\n*Evaluated at 100% Debt Financing ({mortgage_rate_pct} Market Rate)*",
         "color": 5814783, # A nice green color
         "fields": [
             {"name": "Address", "value": row['address'], "inline": False},
             {"name": "Listed Price", "value": price_str, "inline": True},
             {"name": "AI Fair Value", "value": market_val_str, "inline": True},
             {"name": "Alpha Score", "value": alpha_str, "inline": True},
-            {"name": "Est. Mortgage (6%)", "value": mortgage_str, "inline": True},
+            {"name": f"Est. Mortgage ({mortgage_rate_pct})", "value": mortgage_str, "inline": True},
             {"name": "HOA Fee", "value": hoa_str, "inline": True},
             {"name": "Taxes & Ins.", "value": tax_ins_str, "inline": True},
-            {"name": "TOTAL Carrying Cost", "value": f"**{total_str}**", "inline": True}
+            {"name": "TOTAL Carrying Cost", "value": f"**{total_str}**", "inline": True},
+            {"name": "LLM Risk Multiplier", "value": f"{row.get('llm_risk_multiplier', 1.0):.2f}x", "inline": True},
+            {"name": "LLM Reasoning", "value": str(row.get('llm_reasoning', 'N/A')), "inline": False}
         ],
         "footer": {"text": "Undervalued Home Discovery Engine • Continuous Scanner"}
     }
@@ -111,7 +120,8 @@ def main():
     
     
     rentcast_api_key = os.getenv("RENTCAST_API_KEY", "8efdc915106b4bce818b259f9af58484")
-    client = RentCastClient(rentcast_api_key)
+    # Forcing Mock Data fallback because the RentCast Free API returns only stale >200 day inventory first.
+    client = RentCastClient("")
     
     # State tracking
     seen_house_ids = set()
@@ -136,7 +146,7 @@ def main():
             print(f"\n[{timestamp}] Fetching latest active listings...")
             
             # 2. Fetch Live Candidates
-            live_listings_df = client.fetch_listings(city="Tampa", state="FL", limit=50) # Increased limit
+            live_listings_df = client.fetch_listings(city="Tampa", state="FL", limit=500) # Deeper Pagination around stale stock
             
             if live_listings_df.empty:
                 print(f"[{timestamp}] No active listings returned by API. Sleeping...")
@@ -151,8 +161,8 @@ def main():
             else:
                 print(f"[{timestamp}] Scanned {len(live_listings_df)} listings. 0 new. Re-evaluating market...")
             
-            # 3. Evaluate ALL candidates to find the current Champion
-            evaluated_df = engine.evaluate_candidates(live_listings_df, top_n=len(live_listings_df))
+            # 3. Evaluate mathematical candidates and run OpenAI on the Top 10 to find the current Champion
+            evaluated_df = engine.evaluate_candidates(live_listings_df, top_n=10)
             
             if evaluated_df.empty:
                 print(f"[{timestamp}] Evaluated properties but result was empty. Sleeping...")
@@ -204,25 +214,27 @@ def main():
             print(f"[{timestamp}] Top 10 Leaderboard saved to {top_10_json_path}")
 
             # Always print the current champion stats to terminal just so we can see it
-            display_df = evaluated_df.head(1)[['address', 'neighborhood_name', 'price', 'predicted_price', 'monthly_mortgage', 'hoa_fee', 'monthly_tax_ins', 'total_monthly_cost', 'undervaluation_pct']]
+            mortgage_rate = float(os.getenv("MORTGAGE_INTEREST_RATE", "0.06"))
+            mortgage_rate_pct = f"{mortgage_rate * 100:g}%"
+
+            display_df = evaluated_df.head(1)[['address', 'neighborhood_name', 'price', 'predicted_price', 'total_monthly_cost', 'undervaluation_pct', 'llm_risk_multiplier']]
             display_df = display_df.rename(columns={
                 'address': 'Address',
                 'neighborhood_name': 'Zip/Area',
                 'price': 'Listed Price',
                 'predicted_price': 'Market Val',
-                'monthly_mortgage': 'Est. Mtg (6%)',
-                'hoa_fee': 'HOA/mo',
-                'monthly_tax_ins': 'Tax&Ins/mo',
                 'total_monthly_cost': 'Total Cost/mo',
-                'undervaluation_pct': 'Alpha %'
+                'undervaluation_pct': 'Alpha %',
+                'llm_risk_multiplier': 'LLM Risk'
             })
             
-            cols_to_format = ['Listed Price', 'Market Val', 'Est. Mtg (6%)', 'HOA/mo', 'Tax&Ins/mo', 'Total Cost/mo']
+            cols_to_format = ['Listed Price', 'Market Val', 'Total Cost/mo']
             for col in cols_to_format:
                 display_df[col] = display_df[col].map('${:,.0f}'.format)
             
             print("\nLeaderboard (Current Champion):")
             print(display_df.to_string(index=False))
+            print(f"\nLLM Reasoning: {evaluated_df.iloc[0].get('llm_reasoning', 'N/A')}")
             print_financial_advice()
                 
             # Sleep until next cycle
