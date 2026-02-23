@@ -94,14 +94,17 @@ class UndervaluationEngine:
             monthly_interest_rate * (1 + monthly_interest_rate)**num_payments
         ) / ((1 + monthly_interest_rate)**num_payments - 1)
         
-        # Total carrying cost = Mortgage + HOA
-        candidates['total_monthly_cost'] = candidates['monthly_mortgage'] + candidates['hoa_fee']
+        # Estimate Taxes (1.25% annually) and Insurance (0.5% annually)
+        candidates['monthly_tax_ins'] = (candidates['price'] * 0.0175) / 12
         
-        # FIX THE FATAL ERROR: Mortgage principal builds equity, while HOA is a 100% sunk cost.
-        # We only capitalize the HOA fee. Every $1/mo in HOA reduces buying power by ~$150.
-        candidates['fee_capitalized_cost'] = candidates['hoa_fee'] * 150
+        # Total carrying cost = Mortgage + HOA + Taxes/Insurance
+        candidates['total_monthly_cost'] = candidates['monthly_mortgage'] + candidates['hoa_fee'] + candidates['monthly_tax_ins']
         
-        # Adjusted Fair Value = AI Predicted Value minus the Sunk Cost burden of the HOA
+        # FIX THE FATAL ERROR: Mortgage principal builds equity, while HOA/Taxes/Insurance are 100% sunk cost.
+        # We capitalize the sunk costs. Every $1/mo in sunk cost reduces buying power by ~$150.
+        candidates['fee_capitalized_cost'] = (candidates['hoa_fee'] + candidates['monthly_tax_ins']) * 150
+        
+        # Adjusted Fair Value = AI Predicted Value minus the Sunk Cost burden
         candidates['fee_adjusted_value'] = candidates['predicted_price'] - candidates['fee_capitalized_cost']
         
         # Undervaluation Amount = How much True Value you get above the Listed Price
