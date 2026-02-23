@@ -2,14 +2,14 @@ from engine.discovery_engine import UndervaluationEngine
 from engine.api_client import RentCastClient
 import pandas as pd
 import numpy as np
-import config
 import requests
 import json
 import time
 from datetime import datetime
 
+import os
 # You can move this to config.py later if you prefer
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1475344856501981294/U1Ayd3EJAQuLzA5AWsRZOIsUiVQ6Ken9JjQxMIC2Q8o5-9MrPn5RsLQgoHydG2VGQv5i"
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1475344856501981294/U1Ayd3EJAQuLzA5AWsRZOIsUiVQ6Ken9JjQxMIC2Q8o5-9MrPn5RsLQgoHydG2VGQv5i")
 
 def print_financial_advice():
     print("\n" + "="*50)
@@ -38,7 +38,8 @@ def send_discord_alert(gem_df, is_new_champ=False, reason=""):
     alpha_str = f"{row['undervaluation_pct']:.1f}%"
     mortgage_str = f"${row['monthly_mortgage']:,.0f}/mo"
     hoa_str = f"${row['hoa_fee']:,.0f}/mo"
-    total_monthly = row['monthly_mortgage'] + row['hoa_fee']
+    tax_ins_str = f"${row['monthly_tax_ins']:,.0f}/mo"
+    total_monthly = row['total_monthly_cost']
     total_str = f"${total_monthly:,.0f}/mo"
 
     title_prefix = "🏆 NEW CHAMPION:" if is_new_champ else "🚨 NEW GEM:"
@@ -54,6 +55,7 @@ def send_discord_alert(gem_df, is_new_champ=False, reason=""):
             {"name": "Alpha Score", "value": alpha_str, "inline": True},
             {"name": "Est. Mortgage (6%)", "value": mortgage_str, "inline": True},
             {"name": "HOA Fee", "value": hoa_str, "inline": True},
+            {"name": "Taxes & Ins.", "value": tax_ins_str, "inline": True},
             {"name": "TOTAL Carrying Cost", "value": f"**{total_str}**", "inline": True}
         ],
         "footer": {"text": "Undervalued Home Discovery Engine • Continuous Scanner"}
@@ -76,7 +78,7 @@ def send_discord_alert(gem_df, is_new_champ=False, reason=""):
     # Sleep slightly to avoid Discord rate limits
     time.sleep(1)
 
-import os
+
 
 CHAMPION_FILE = "data/current_champion.json"
 
@@ -107,7 +109,9 @@ def main():
     engine = UndervaluationEngine(data_path=historical_data_path)
     engine.run_pipeline()
     
-    client = RentCastClient(config.RENTCAST_API_KEY)
+    
+    rentcast_api_key = os.getenv("RENTCAST_API_KEY", "8efdc915106b4bce818b259f9af58484")
+    client = RentCastClient(rentcast_api_key)
     
     # State tracking
     seen_house_ids = set()
@@ -200,7 +204,7 @@ def main():
             print(f"[{timestamp}] Top 10 Leaderboard saved to {top_10_json_path}")
 
             # Always print the current champion stats to terminal just so we can see it
-            display_df = evaluated_df.head(1)[['address', 'neighborhood_name', 'price', 'predicted_price', 'monthly_mortgage', 'hoa_fee', 'total_monthly_cost', 'undervaluation_pct']]
+            display_df = evaluated_df.head(1)[['address', 'neighborhood_name', 'price', 'predicted_price', 'monthly_mortgage', 'hoa_fee', 'monthly_tax_ins', 'total_monthly_cost', 'undervaluation_pct']]
             display_df = display_df.rename(columns={
                 'address': 'Address',
                 'neighborhood_name': 'Zip/Area',
@@ -208,11 +212,12 @@ def main():
                 'predicted_price': 'Market Val',
                 'monthly_mortgage': 'Est. Mtg (6%)',
                 'hoa_fee': 'HOA/mo',
+                'monthly_tax_ins': 'Tax&Ins/mo',
                 'total_monthly_cost': 'Total Cost/mo',
                 'undervaluation_pct': 'Alpha %'
             })
             
-            cols_to_format = ['Listed Price', 'Market Val', 'Est. Mtg (6%)', 'HOA/mo', 'Total Cost/mo']
+            cols_to_format = ['Listed Price', 'Market Val', 'Est. Mtg (6%)', 'HOA/mo', 'Tax&Ins/mo', 'Total Cost/mo']
             for col in cols_to_format:
                 display_df[col] = display_df[col].map('${:,.0f}'.format)
             
