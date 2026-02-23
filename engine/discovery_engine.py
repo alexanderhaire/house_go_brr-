@@ -41,7 +41,7 @@ class UndervaluationEngine:
         for nb_id in self.df['neighborhood_id'].unique():
             nb_data = self.df[self.df['neighborhood_id'] == nb_id]
             
-            if len(nb_data) < 5:
+            if len(nb_data) < 15:
                 continue
             
             local_model = OverfitPerceptron()
