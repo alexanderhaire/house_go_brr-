@@ -76,6 +76,26 @@ def send_discord_alert(gem_df, is_new_champ=False, reason=""):
     # Sleep slightly to avoid Discord rate limits
     time.sleep(1)
 
+import os
+
+CHAMPION_FILE = "data/current_champion.json"
+
+def load_champion():
+    if os.path.exists(CHAMPION_FILE):
+        try:
+            with open(CHAMPION_FILE, 'r') as f:
+                data = json.load(f)
+                return data.get('house_id')
+        except:
+            return None
+    return None
+
+def save_champion(house_id):
+    # Ensure data directory exists
+    os.makedirs("data", exist_ok=True)
+    with open(CHAMPION_FILE, 'w') as f:
+        json.dump({'house_id': house_id}, f)
+
 def main():
     print("="*50)
     print("HOUSE DISCOVERY ENGINE: DAEMON MODE STARTING")
@@ -91,7 +111,11 @@ def main():
     
     # State tracking
     seen_house_ids = set()
-    current_champion_id = None
+    
+    # Load champion from persistent storage so Railway restarts don't trigger duplicate alerts
+    current_champion_id = load_champion()
+    if current_champion_id:
+        print(f"Successfully loaded previous champion from memory: {current_champion_id}")
     
     # SECURITY: The RentCast Free Tier only allows 50 requests per month.
     # To stay safe, we scan once every 15 hours. 
@@ -137,6 +161,7 @@ def main():
             if current_champion_id is None:
                 # First run - Establish initial champion
                 current_champion_id = best_id
+                save_champion(best_id)
                 print("\n" + "🏆"*20)
                 print(f"INITIAL MARKET CHAMPION ESTABLISHED: {current_best['address']}")
                 print("🏆"*20)
@@ -158,10 +183,21 @@ def main():
                 print(f"New Champion: {current_best['address']} (Alpha: {current_best['undervaluation_pct']:.1f}%)")
                 
                 current_champion_id = best_id
+                save_champion(best_id)
                 send_discord_alert(evaluated_df.head(1), is_new_champ=True, reason=reason)
                 
             else:
                 print(f"[{timestamp}] Champion holding strong: {current_best['address']} (Alpha: {current_best['undervaluation_pct']:.1f}%)")
+
+            # Always save the Top 10 Leaderboard to a JSON file (Information Engine Feature)
+            top_10_df = evaluated_df.head(10).copy()
+            # Convert datetime columns to string before exporting to JSON
+            if 'date' in top_10_df.columns:
+                 top_10_df['date'] = top_10_df['date'].astype(str)
+                 
+            top_10_json_path = "data/top_10_winners.json"
+            top_10_df.to_json(top_10_json_path, orient='records', indent=4)
+            print(f"[{timestamp}] Top 10 Leaderboard saved to {top_10_json_path}")
 
             # Always print the current champion stats to terminal just so we can see it
             display_df = evaluated_df.head(1)[['address', 'neighborhood_name', 'price', 'predicted_price', 'monthly_mortgage', 'hoa_fee', 'total_monthly_cost', 'undervaluation_pct']]
