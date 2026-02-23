@@ -12,21 +12,22 @@ class LLMPropertyEvaluator:
 
     def evaluate_property(self, property_data):
         """
-        Takes property metadata and asks GPT-4o to generate a qualitative risk multiplier.
-        Returns a dict with `risk_multiplier` (float 0.5 - 1.0) and `reasoning` (str).
+        Takes property metadata and asks GPT-4o to generate a qualitative repair cost estimate in dollars.
+        Returns a dict with `repair_cost_estimate` (int) and `reasoning` (str).
         """
         if not self.client:
-            return {"risk_multiplier": 1.0, "reasoning": "No OpenAI API key provided."}
+            return {"repair_cost_estimate": 0, "reasoning": "No OpenAI API key provided."}
 
         system_prompt = """
 You are an expert real estate investor and flipper. 
-Your job is to analyze property metadata and determine if the property is likely a "turnkey" ready-to-move-in home (Multiplier 1.0) or a "fixer-upper/gut job" requiring significant capital expenditure (Multiplier closer to 0.7 or lower).
-If the property has been on the market for a long time (e.g., > 60 days) in a hot market, or is very old without recent updates, it's likely a fixer-upper.
+Your job is to analyze property metadata, especially the listing description, and determine if the property is likely a "turnkey" ready-to-move-in home ($0 repair cost) or a "fixer-upper" requiring significant capital expenditure.
+Estimate the absolute dollar amount of repairs needed to bring the property to market standard.
+If the description mentions "TLC", "investor special", "as-is", or it's very old without recent updates, estimate a higher cost (e.g. $20k - $100k+).
 
 Respond strictly with a JSON object in the following format:
 {
-    "risk_multiplier": 0.85, 
-    "reasoning": "A concise 1-sentence explanation of why you chose this multiplier."
+    "repair_cost_estimate": 25000, 
+    "reasoning": "A concise 1-sentence explanation of why you estimated this repair cost."
 }
 """
         
@@ -41,6 +42,7 @@ Please evaluate the following property for hidden risk / condition issues:
 - Year Built: {property_data.get('year_built', 'Unknown')}
 - Days on Market: {property_data.get('days_on_market', 'Unknown')}
 - HOA Fee: ${property_data.get('hoa_fee', 0)}/mo
+- Public Description: {property_data.get('description', 'Not provided')}
 """
 
         try:
@@ -57,15 +59,15 @@ Please evaluate the following property for hidden risk / condition issues:
             result_str = response.choices[0].message.content
             result = json.loads(result_str)
             
-            # Bound the multiplier between 0.5 and 1.0 to prevent crazy outputs
-            multiplier = max(0.5, min(1.0, float(result.get("risk_multiplier", 1.0))))
+            # Default to 0 if there's an issue parsing
+            repair_cost = int(result.get("repair_cost_estimate", 0))
             reasoning = result.get("reasoning", "No clear reasoning provided.")
             
             return {
-                "risk_multiplier": multiplier,
+                "repair_cost_estimate": repair_cost,
                 "reasoning": reasoning
             }
             
         except Exception as e:
             print(f"LLM Evaluation failed: {e}")
-            return {"risk_multiplier": 1.0, "reasoning": f"LLM evaluation failed: {e}"}
+            return {"repair_cost_estimate": 0, "reasoning": f"LLM evaluation failed: {e}"}

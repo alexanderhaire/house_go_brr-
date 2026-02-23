@@ -124,8 +124,8 @@ class UndervaluationEngine:
         for idx, row in top_preliminary.iterrows():
             eval_result = llm.evaluate_property(row.to_dict())
             
-            # Apply the multiplier to the predicted baseline price
-            updated_predicted_price = row['predicted_price'] * eval_result['risk_multiplier']
+            # Subtract the absolute repair cost estimate from the predicted baseline price
+            updated_predicted_price = row['predicted_price'] - eval_result['repair_cost_estimate']
             
             # Recalculate everything downstream
             updated_fee_adjusted = updated_predicted_price - row['fee_capitalized_cost']
@@ -136,7 +136,7 @@ class UndervaluationEngine:
             row['fee_adjusted_value'] = updated_fee_adjusted
             row['undervaluation_amount'] = updated_underv_amt
             row['undervaluation_pct'] = updated_underv_pct
-            row['llm_risk_multiplier'] = eval_result['risk_multiplier']
+            row['llm_repair_estimate'] = eval_result['repair_cost_estimate']
             row['llm_reasoning'] = eval_result['reasoning']
             
             updated_rows.append(row)

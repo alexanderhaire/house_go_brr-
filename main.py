@@ -64,7 +64,7 @@ def send_discord_alert(gem_df, is_new_champ=False, reason=""):
             {"name": "HOA Fee", "value": hoa_str, "inline": True},
             {"name": "Taxes & Ins.", "value": tax_ins_str, "inline": True},
             {"name": "TOTAL Carrying Cost", "value": f"**{total_str}**", "inline": True},
-            {"name": "LLM Risk Multiplier", "value": f"{row.get('llm_risk_multiplier', 1.0):.2f}x", "inline": True},
+            {"name": "LLM Repair Est.", "value": f"${row.get('llm_repair_estimate', 0):,.0f}", "inline": True},
             {"name": "LLM Reasoning", "value": str(row.get('llm_reasoning', 'N/A')), "inline": False}
         ],
         "footer": {"text": "Undervalued Home Discovery Engine • Continuous Scanner"}
@@ -217,7 +217,7 @@ def main():
             mortgage_rate = float(os.getenv("MORTGAGE_INTEREST_RATE", "0.06"))
             mortgage_rate_pct = f"{mortgage_rate * 100:g}%"
 
-            display_df = evaluated_df.head(1)[['address', 'neighborhood_name', 'price', 'predicted_price', 'total_monthly_cost', 'undervaluation_pct', 'llm_risk_multiplier']]
+            display_df = evaluated_df.head(1)[['address', 'neighborhood_name', 'price', 'predicted_price', 'total_monthly_cost', 'undervaluation_pct', 'llm_repair_estimate']]
             display_df = display_df.rename(columns={
                 'address': 'Address',
                 'neighborhood_name': 'Zip/Area',
@@ -225,7 +225,7 @@ def main():
                 'predicted_price': 'Market Val',
                 'total_monthly_cost': 'Total Cost/mo',
                 'undervaluation_pct': 'Alpha %',
-                'llm_risk_multiplier': 'LLM Risk'
+                'llm_repair_estimate': 'Repair Est'
             })
             
             cols_to_format = ['Listed Price', 'Market Val', 'Total Cost/mo']
