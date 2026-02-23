@@ -23,55 +23,58 @@ def print_financial_advice():
     print("\nPRO TIP: Focus on 'Alpha' homes with LOW or NO HOA fees to")
     print("maximize the ratio of wealth-building to sunk-cost spending.")
 
-def send_discord_alert(gem_df):
+def send_discord_alert(gem_df, is_new_champ=False, reason=""):
     """
-    Sends a formatted alert to Discord for newly discovered undervalued properties.
+    Sends a formatted alert to Discord for the Champion property.
     """
     if not DISCORD_WEBHOOK_URL:
         return
 
-    for _, row in gem_df.iterrows():
-        # Format the numbers
-        price_str = f"${row['price']:,.0f}"
-        market_val_str = f"${row['predicted_price']:,.0f}"
-        alpha_str = f"{row['undervaluation_pct']:.1f}%"
-        mortgage_str = f"${row['monthly_mortgage']:,.0f}/mo"
-        hoa_str = f"${row['hoa_fee']:,.0f}/mo"
-        total_monthly = row['monthly_mortgage'] + row['hoa_fee']
-        total_str = f"${total_monthly:,.0f}/mo"
+    row = gem_df.iloc[0] # We only send the top 1
 
-        embed = {
-            "title": f"🚨 NEW HIGH-ALPHA GEM: {alpha_str} Undervalued",
-            "description": f"Found a new highly undervalued property in Tampa ({row['neighborhood_name']})!\n*Evaluated at 100% Debt Financing (6% Market Rate)*",
-            "color": 5814783, # A nice green color
-            "fields": [
-                {"name": "Address", "value": row['address'], "inline": False},
-                {"name": "Listed Price", "value": price_str, "inline": True},
-                {"name": "AI Fair Value", "value": market_val_str, "inline": True},
-                {"name": "Alpha Score", "value": alpha_str, "inline": True},
-                {"name": "Est. Mortgage (6%)", "value": mortgage_str, "inline": True},
-                {"name": "HOA Fee", "value": hoa_str, "inline": True},
-                {"name": "TOTAL Carrying Cost", "value": f"**{total_str}**", "inline": True}
-            ],
-            "footer": {"text": "Undervalued Home Discovery Engine • Continuous Scanner"}
-        }
+    # Format the numbers
+    price_str = f"${row['price']:,.0f}"
+    market_val_str = f"${row['predicted_price']:,.0f}"
+    alpha_str = f"{row['undervaluation_pct']:.1f}%"
+    mortgage_str = f"${row['monthly_mortgage']:,.0f}/mo"
+    hoa_str = f"${row['hoa_fee']:,.0f}/mo"
+    total_monthly = row['monthly_mortgage'] + row['hoa_fee']
+    total_str = f"${total_monthly:,.0f}/mo"
 
-        payload = {
-            "content": f"🏠 **New Gem Alert** in {row['neighborhood_name']}! ({row['address']} for {price_str})",
-            "embeds": [embed]
-        }
+    title_prefix = "🏆 NEW CHAMPION:" if is_new_champ else "🚨 NEW GEM:"
 
-        try:
-            response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
-            if response.status_code == 204:
-                print(f"  -> Successfully sent Discord alert for {row['address']}")
-            else:
-                print(f"  -> Failed to send Discord alert: {response.status_code} - {response.text}")
-        except Exception as e:
-            print(f"  -> Error sending Discord alert: {e}")
-        
-        # Sleep slightly to avoid Discord rate limits
-        time.sleep(1)
+    embed = {
+        "title": f"{title_prefix} {alpha_str} Undervalued",
+        "description": f"The #1 Best Deal currently on the market in Tampa ({row['neighborhood_name']})!\n{reason}\n*Evaluated at 100% Debt Financing (6% Market Rate)*",
+        "color": 5814783, # A nice green color
+        "fields": [
+            {"name": "Address", "value": row['address'], "inline": False},
+            {"name": "Listed Price", "value": price_str, "inline": True},
+            {"name": "AI Fair Value", "value": market_val_str, "inline": True},
+            {"name": "Alpha Score", "value": alpha_str, "inline": True},
+            {"name": "Est. Mortgage (6%)", "value": mortgage_str, "inline": True},
+            {"name": "HOA Fee", "value": hoa_str, "inline": True},
+            {"name": "TOTAL Carrying Cost", "value": f"**{total_str}**", "inline": True}
+        ],
+        "footer": {"text": "Undervalued Home Discovery Engine • Continuous Scanner"}
+    }
+
+    payload = {
+        "content": f"🏆 **New Champion Alert** in {row['neighborhood_name']}! ({row['address']} for {price_str})",
+        "embeds": [embed]
+    }
+
+    try:
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        if response.status_code == 204:
+            print(f"  -> Successfully sent Discord alert for {row['address']}")
+        else:
+            print(f"  -> Failed to send Discord alert: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"  -> Error sending Discord alert: {e}")
+    
+    # Sleep slightly to avoid Discord rate limits
+    time.sleep(1)
 
 def main():
     print("="*50)
@@ -88,10 +91,15 @@ def main():
     
     # State tracking
     seen_house_ids = set()
-    scan_interval_seconds = 60 * 5 # Scan every 5 minutes
+    current_champion_id = None
+    
+    # SECURITY: The RentCast Free Tier only allows 50 requests per month.
+    # To stay safe, we scan once every 15 hours. 
+    # (30 days * 24 hours / 15 = 48 requests/month)
+    scan_interval_seconds = 60 * 60 * 15
     
     print("\n==================================================")
-    print("DAEMON ONLINE: Scanning market for High-Alpha Gems")
+    print("DAEMON ONLINE: Scanning market for the Champion Home")
     print("==================================================")
     
     while True:
@@ -107,61 +115,74 @@ def main():
                 time.sleep(scan_interval_seconds)
                 continue
                 
-            # Filter to only NEW listings we haven't processed
+            # Track newly found listings for logging purposes
             new_listings_df = live_listings_df[~live_listings_df['house_id'].isin(seen_house_ids)]
+            if not new_listings_df.empty:
+                print(f"[{timestamp}] Found {len(new_listings_df)} NEW listings. Evaluating total market...")
+                seen_house_ids.update(new_listings_df['house_id'].tolist())
+            else:
+                print(f"[{timestamp}] Scanned {len(live_listings_df)} listings. 0 new. Re-evaluating market...")
             
-            if new_listings_df.empty:
-                print(f"[{timestamp}] Scanned {len(live_listings_df)} listings. 0 new. Sleeping...")
+            # 3. Evaluate ALL candidates to find the current Champion
+            evaluated_df = engine.evaluate_candidates(live_listings_df, top_n=len(live_listings_df))
+            
+            if evaluated_df.empty:
+                print(f"[{timestamp}] Evaluated properties but result was empty. Sleeping...")
                 time.sleep(scan_interval_seconds)
                 continue
+
+            current_best = evaluated_df.iloc[0]
+            best_id = current_best['house_id']
+            
+            if current_champion_id is None:
+                # First run - Establish initial champion
+                current_champion_id = best_id
+                print("\n" + "🏆"*20)
+                print(f"INITIAL MARKET CHAMPION ESTABLISHED: {current_best['address']}")
+                print("🏆"*20)
+                reason = "_Initial Scan - Best property currently available._"
+                send_discord_alert(evaluated_df.head(1), is_new_champ=True, reason=reason)
                 
-            print(f"[{timestamp}] Found {len(new_listings_df)} NEW listings! Evaluating Alpha scores...")
-            
-            # 3. Evaluate ONLY new candidates against models
-            evaluated_df = engine.evaluate_candidates(new_listings_df, top_n=len(new_listings_df))
-            
-            # Update seen state
-            seen_house_ids.update(new_listings_df['house_id'].tolist())
-            
-            # Filter for "Gems" (Alpha > 10%)
-            gems = evaluated_df[evaluated_df['undervaluation_pct'] >= 10.0].copy()
-            
-            if gems.empty:
-                print(f"[{timestamp}] Evaluated {len(new_listings_df)} properties. No high-alpha gems found. Sleeping...")
+            elif best_id != current_champion_id:
+                # Champion changed!
+                print("\n" + "🏆"*20)
+                print(f"CHAMPION OVERTHROWN!")
+                print("🏆"*20)
+                
+                if current_champion_id not in live_listings_df['house_id'].values:
+                    reason = "*Previous champion sold/delisted - falling to next in line.*"
+                else:
+                    reason = "*New property dethroned the previous champion!*"
+                
+                print(f"Reason: {reason}")
+                print(f"New Champion: {current_best['address']} (Alpha: {current_best['undervaluation_pct']:.1f}%)")
+                
+                current_champion_id = best_id
+                send_discord_alert(evaluated_df.head(1), is_new_champ=True, reason=reason)
+                
             else:
-                # WE FOUND GEMS! Alert the user.
-                print("\n" + "🚨"*20)
-                print(f"NEW UNDERVALUED GEMS DISCOVERED! ({len(gems)} found)")
-                print("🚨"*20)
-                
-                # Send Discord Alerts
-                print("Sending alerts to Discord webhook...")
-                send_discord_alert(gems)
-                
-                # Formatting
-                pd.set_option('display.max_columns', None)
-                pd.set_option('display.width', 1000)
-                
-                display_df = gems[['address', 'neighborhood_name', 'price', 'predicted_price', 'monthly_mortgage', 'hoa_fee', 'total_monthly_cost', 'undervaluation_pct']]
-                display_df = display_df.rename(columns={
-                    'address': 'Address',
-                    'neighborhood_name': 'Zip/Area',
-                    'price': 'Listed Price',
-                    'predicted_price': 'Market Val',
-                    'monthly_mortgage': 'Est. Mtg (6%)',
-                    'hoa_fee': 'HOA/mo',
-                    'total_monthly_cost': 'Total Cost/mo',
-                    'undervaluation_pct': 'Alpha %'
-                })
-                
-                display_df = display_df.sort_values('Alpha %', ascending=False)
-                
-                cols_to_format = ['Listed Price', 'Market Val', 'Est. Mtg (6%)', 'HOA/mo', 'Total Cost/mo']
-                for col in cols_to_format:
-                    display_df[col] = display_df[col].map('${:,.0f}'.format)
-                
-                print(display_df.to_string(index=False))
-                print_financial_advice()
+                print(f"[{timestamp}] Champion holding strong: {current_best['address']} (Alpha: {current_best['undervaluation_pct']:.1f}%)")
+
+            # Always print the current champion stats to terminal just so we can see it
+            display_df = evaluated_df.head(1)[['address', 'neighborhood_name', 'price', 'predicted_price', 'monthly_mortgage', 'hoa_fee', 'total_monthly_cost', 'undervaluation_pct']]
+            display_df = display_df.rename(columns={
+                'address': 'Address',
+                'neighborhood_name': 'Zip/Area',
+                'price': 'Listed Price',
+                'predicted_price': 'Market Val',
+                'monthly_mortgage': 'Est. Mtg (6%)',
+                'hoa_fee': 'HOA/mo',
+                'total_monthly_cost': 'Total Cost/mo',
+                'undervaluation_pct': 'Alpha %'
+            })
+            
+            cols_to_format = ['Listed Price', 'Market Val', 'Est. Mtg (6%)', 'HOA/mo', 'Total Cost/mo']
+            for col in cols_to_format:
+                display_df[col] = display_df[col].map('${:,.0f}'.format)
+            
+            print("\nLeaderboard (Current Champion):")
+            print(display_df.to_string(index=False))
+            print_financial_advice()
                 
             # Sleep until next cycle
             time.sleep(scan_interval_seconds)
